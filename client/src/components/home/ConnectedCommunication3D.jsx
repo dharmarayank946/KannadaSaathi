@@ -35,23 +35,9 @@ export default function ConnectedCommunication3D() {
       window.matchMedia &&
       window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-    // Mouse tracking for subtle desktop parallax
+    // Calm, non-intrusive ambient background (Strictly NO mouse parallax or cursor tracking)
     let mouseX = 0;
     let mouseY = 0;
-    let targetMouseX = 0;
-    let targetMouseY = 0;
-
-    const handleMouseMove = (e) => {
-      if (prefersReducedMotion) return;
-      const rect = containerRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      const x = (e.clientX - rect.left) / rect.width - 0.5;
-      const y = (e.clientY - rect.top) / rect.height - 0.5;
-      targetMouseX = x * 0.45;
-      targetMouseY = y * 0.35;
-    };
-
-    window.addEventListener('mousemove', handleMouseMove, { passive: true });
 
     // Handle high-DPI canvas resizing
     const resize = () => {
