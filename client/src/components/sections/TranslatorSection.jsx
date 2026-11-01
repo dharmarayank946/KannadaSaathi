@@ -230,6 +230,11 @@ export default function TranslatorSection({ onBackToHome, langMode, serverStatus
 
     try {
       let response = null;
+      let translatedText = '';
+      let transliteration = '';
+      let engineName = '';
+      let modeName = '';
+
       try {
         response = await fetch('/api/translate', {
           method: 'POST',
@@ -240,37 +245,70 @@ export default function TranslatorSection({ onBackToHome, langMode, serverStatus
             targetLang: directTargetLang
           })
         });
-      } catch (err) {
-        response = await fetch('http://localhost:5000/api/translate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            text: textToTranslate,
-            sourceLang: directSourceLang,
-            targetLang: directTargetLang
-          })
-        });
+
+        if (!response.ok) {
+          response = await fetch('http://localhost:5000/api/translate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              text: textToTranslate,
+              sourceLang: directSourceLang,
+              targetLang: directTargetLang
+            })
+          });
+        }
+
+        if (response && response.ok) {
+          const data = await response.json();
+          if (data.success && data.translatedText) {
+            translatedText = data.translatedText;
+            transliteration = data.transliteration || '';
+            engineName = data.engine || 'KannadaSaathi Neural Engine';
+            modeName = data.mode || 'live-neural';
+          }
+        }
+      } catch (e) {
+        console.warn('Backend translation failed, trying direct neural service:', e);
       }
 
-      const data = await response.json();
+      // Direct neural service fallback
+      if (!translatedText) {
+        try {
+          const neuralUrl = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(textToTranslate)}&langpair=${directSourceLang}|${directTargetLang}`;
+          const nResp = await fetch(neuralUrl);
+          if (nResp.ok) {
+            const nData = await nResp.json();
+            if (nData.responseData && nData.responseData.translatedText) {
+              const resText = nData.responseData.translatedText.trim();
+              if (resText && !resText.toUpperCase().includes('QUERY LENGTH LIMIT')) {
+                translatedText = resText;
+                engineName = 'MyMemory Live Neural Translation';
+                modeName = 'direct-neural';
+              }
+            }
+          }
+        } catch (nErr) {
+          console.warn('Direct neural translation service failed:', nErr);
+        }
+      }
 
-      if (response.ok && data.success && data.translatedText) {
+      if (translatedText) {
         setDirectResult({
-          originalText: data.originalText || textToTranslate,
-          translatedText: data.translatedText,
-          transliteration: data.transliteration || '',
-          engine: data.engine || (data.mode === 'gemini-live' ? 'Google Gemini AI' : 'Live Neural Engine'),
+          originalText: textToTranslate,
+          translatedText,
+          transliteration,
+          engine: engineName,
           sourceLang: directSourceLang,
           targetLang: directTargetLang,
-          mode: data.mode
+          mode: modeName
         });
 
         // Auto-speak in target language
         if (autoSpeak) {
-          speakText(data.translatedText, directTargetLang);
+          speakText(translatedText, directTargetLang);
         }
       } else {
-        const errorMsg = data?.error || (isKn ? 'ಅನುವಾದ ಪ್ರಕ್ರಿಯೆ ವಿಫಲವಾಗಿದೆ. ದಯವಿಟ್ಟು ಮತ್ತೊಮ್ಮೆ ಪ್ರಯತ್ನಿಸಿ.' : 'Translation failed. Please try again.');
+        const errorMsg = isKn ? 'ಅನುವಾದ ಪ್ರಕ್ರಿಯೆ ವಿಫಲವಾಗಿದೆ. ದಯವಿಟ್ಟು ಮತ್ತೊಮ್ಮೆ ಪ್ರಯತ್ನಿಸಿ.' : 'Translation service could not be reached. Please check connection and try again.';
         setDirectError(errorMsg);
         setDirectResult(null);
       }
@@ -472,18 +510,37 @@ export default function TranslatorSection({ onBackToHome, langMode, serverStatus
       let modeUsed = 'live';
       let transliteration = '';
 
-      if (response.ok) {
+      if (response && response.ok) {
         const data = await response.json();
         if (data.success && data.translatedText) {
           translated = data.translatedText;
           modeUsed = data.mode || 'live';
           transliteration = data.transliteration || '';
-        } else {
-          translated = data.error || (isKn ? 'ಅನುವಾದ ಲಭ್ಯವಿಲ್ಲ' : 'Translation unavailable');
-          modeUsed = 'error';
         }
-      } else {
-        translated = isKn ? 'ಅನುವಾದ ಪ್ರಕ್ರಿಯೆಯಲ್ಲಿ ತೊಂದರೆ' : 'Translation server error';
+      }
+
+      // Direct neural translation fallback
+      if (!translated) {
+        try {
+          const neuralUrl = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(trimmed)}&langpair=${sourceLang}|${targetLang}`;
+          const nResp = await fetch(neuralUrl);
+          if (nResp.ok) {
+            const nData = await nResp.json();
+            if (nData.responseData && nData.responseData.translatedText) {
+              const resText = nData.responseData.translatedText.trim();
+              if (resText && !resText.toUpperCase().includes('QUERY LENGTH LIMIT')) {
+                translated = resText;
+                modeUsed = 'neural-direct';
+              }
+            }
+          }
+        } catch (nErr) {
+          console.warn('Duo direct neural translation error:', nErr);
+        }
+      }
+
+      if (!translated) {
+        translated = isKn ? 'ಅನುವಾದ ಪ್ರಕ್ರಿಯೆಯಲ್ಲಿ ತೊಂದರೆ' : 'Translation service unavailable';
         modeUsed = 'error';
       }
 

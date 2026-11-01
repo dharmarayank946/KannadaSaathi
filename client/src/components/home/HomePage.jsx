@@ -16,6 +16,7 @@ import {
 import FaceToFaceConversationSection from './FaceToFaceConversationSection';
 import VoiceTranslatorWidget from '../VoiceTranslatorWidget';
 import ConnectedCommunication3D from './ConnectedCommunication3D';
+import RajyotsavaLiveTracker from '../common/RajyotsavaLiveTracker';
 
 export default function HomePage({ onSelectSection, langMode = 'kn' }) {
   const isKn = langMode === 'kn';
@@ -248,6 +249,9 @@ export default function HomePage({ onSelectSection, langMode = 'kn' }) {
         aria-label={isKn ? "ತ್ವರಿತ ಆರಂಭ" : "Quick Start"}
       >
         <div className="features-section-inner">
+          {/* Live Accurate Kannada Rajyotsava Celebration / Countdown Tracker */}
+          <RajyotsavaLiveTracker langMode={langMode} />
+
           <div className="features-head-group">
             <div className="features-mini-tag">
               <Sparkles size={14} color="var(--color-flag-red)" />

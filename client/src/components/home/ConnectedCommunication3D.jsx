@@ -147,10 +147,6 @@ export default function ConnectedCommunication3D() {
 
       time += prefersReducedMotion ? 0 : 0.016;
 
-      // Smooth mouse parallax lerp
-      mouseX += (targetMouseX - mouseX) * 0.055;
-      mouseY += (targetMouseY - mouseY) * 0.055;
-
       ctx.clearRect(0, 0, width, height);
 
       const centerX = width * 0.5;
@@ -162,10 +158,10 @@ export default function ConnectedCommunication3D() {
         ? Math.max(width * 0.42, 150)
         : Math.min(width * 0.36, height * 0.48);
 
-      // Global camera rotation
-      const rotAngleY = time * 0.16 + mouseX * 0.85;
-      const rotAngleX = 0.2 + Math.sin(time * 0.3) * 0.05 + mouseY * 0.65;
-      const rotAngleZ = Math.cos(time * 0.22) * 0.04;
+      // Stable, comfortable ambient rotation (Independent of mouse position)
+      const rotAngleY = time * 0.12;
+      const rotAngleX = 0.2 + Math.sin(time * 0.25) * 0.04;
+      const rotAngleZ = Math.cos(time * 0.18) * 0.03;
 
       // Perspective projection helper
       const project = ([px, py, pz]) => {
@@ -539,7 +535,6 @@ export default function ConnectedCommunication3D() {
 
     return () => {
       if (animationFrameId) cancelAnimationFrame(animationFrameId);
-      window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('resize', resize);
       observer.disconnect();
     };

@@ -8,6 +8,7 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const NODE_ENV = process.env.NODE_ENV || 'development';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 
 // Security and middleware
@@ -50,6 +51,7 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'healthy',
     service: 'KannadaSaathi Backend API',
+    environment: NODE_ENV,
     geminiConfigured: Boolean(genAI),
     mode: genAI ? 'live-api' : 'demo-mode',
     ttsAvailable: true,
@@ -492,8 +494,38 @@ function lookupDictionary(text, fromLang, toLang) {
   return null;
 }
 
-// Live real-time translation fetcher via neural translation API
+// Live real-time translation fetcher via neural translation APIs
 async function fetchOnlineTranslation(text, sourceLang, targetLang) {
+  // Strategy 1: Google Neural Translation RPC (Fast, accurate, full sentences)
+  try {
+    const gUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(sourceLang)}&tl=${encodeURIComponent(targetLang)}&dt=t&q=${encodeURIComponent(text)}`;
+    const gController = new AbortController();
+    const gTimer = setTimeout(() => gController.abort(), 4500);
+
+    const gRes = await fetch(gUrl, {
+      signal: gController.signal,
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+    });
+    clearTimeout(gTimer);
+
+    if (gRes.ok) {
+      const gData = await gRes.json();
+      if (Array.isArray(gData) && Array.isArray(gData[0])) {
+        const fullTranslation = gData[0]
+          .filter(segment => segment && typeof segment[0] === 'string')
+          .map(segment => segment[0])
+          .join('')
+          .trim();
+        if (fullTranslation) {
+          return fullTranslation;
+        }
+      }
+    }
+  } catch (gErr) {
+    // Continue to strategy 2
+  }
+
+  // Strategy 2: MyMemory Neural Service
   const pair = `${sourceLang}|${targetLang}`;
   const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${encodeURIComponent(pair)}&de=kannadasaathi@assistant.org`;
   const controller = new AbortController();

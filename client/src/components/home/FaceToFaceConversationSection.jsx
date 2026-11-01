@@ -100,12 +100,30 @@ export default function FaceToFaceConversationSection({ langMode = 'kn' }) {
       let translated = '';
       if (resp && resp.ok) {
         const data = await resp.json();
-        translated = data.translatedText || inputText;
-      } else {
-        // Fallback translation
-        translated = sourceLang === 'en' && targetLang === 'kn'
-          ? 'ಧನ್ಯವಾದಗಳು, ನಿಮ್ಮ ಮಾತು ತಿಳಿಯಿತು.'
-          : 'Thank you, I understand your message.';
+        translated = data.translatedText || '';
+      }
+
+      // Direct neural translation fallback if backend service was unreachable
+      if (!translated) {
+        try {
+          const neuralUrl = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(inputText)}&langpair=${sourceLang}|${targetLang}`;
+          const nResp = await fetch(neuralUrl);
+          if (nResp.ok) {
+            const nData = await nResp.json();
+            if (nData.responseData && nData.responseData.translatedText) {
+              const resText = nData.responseData.translatedText.trim();
+              if (resText && !resText.toUpperCase().includes('QUERY LENGTH LIMIT')) {
+                translated = resText;
+              }
+            }
+          }
+        } catch (neuralErr) {
+          console.warn('Direct neural translation fallback error:', neuralErr);
+        }
+      }
+
+      if (!translated) {
+        throw new Error('Translation service currently unavailable');
       }
 
       const newMsg = {
@@ -149,8 +167,8 @@ export default function FaceToFaceConversationSection({ langMode = 'kn' }) {
     }
   };
 
-  // Speech Recognition handler
-  const handleToggleMic = (speaker) => {
+  // Speech Recognition handler with explicit permissions
+  const handleToggleMic = async (speaker) => {
     if (listeningSpeaker === speaker) {
       if (recognitionRef.current) {
         try { recognitionRef.current.stop(); } catch (e) {}
@@ -170,6 +188,25 @@ export default function FaceToFaceConversationSection({ langMode = 'kn' }) {
     }
 
     setErrorMessage(null);
+
+    // Request microphone permission explicitly via getUserMedia
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach((track) => track.stop());
+      } catch (permErr) {
+        if (permErr.name === 'NotAllowedError' || permErr.name === 'PermissionDeniedError') {
+          setErrorMessage(
+            isKn
+              ? 'ಮೈಕ್ರೊಫೋನ್ ಅನುಮತಿ ನಿರಾಕರಿಸಲಾಗಿದೆ. ಬ್ರೌಸರ್ ಸೆಟ್ಟಿಂಗ್ಸ್‌ನಲ್ಲಿ ಮೈಕ್ ಅನುಮತಿಸಿ.'
+              : 'Microphone permission denied. Please allow microphone access in your browser settings.'
+          );
+          setListeningSpeaker(null);
+          return;
+        }
+      }
+    }
+
     setListeningSpeaker(speaker);
 
     try {
@@ -180,16 +217,32 @@ export default function FaceToFaceConversationSection({ langMode = 'kn' }) {
       const bcp = SUPPORTED_LANGUAGES.find(l => l.code === langCode)?.bcp47 || (langCode === 'kn' ? 'kn-IN' : 'en-IN');
       recognition.lang = bcp;
       recognition.continuous = false;
-      recognition.interimResults = false;
+      recognition.interimResults = true;
+
+      recognition.onstart = () => {
+        setListeningSpeaker(speaker);
+      };
 
       recognition.onresult = (event) => {
-        const transcript = event.results[0][0].transcript;
-        if (speaker === 'person1') {
-          setTextP1(transcript);
-        } else {
-          setTextP2(transcript);
+        let interim = '';
+        let final = '';
+
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            final += event.results[i][0].transcript;
+          } else {
+            interim += event.results[i][0].transcript;
+          }
         }
-        setListeningSpeaker(null);
+
+        const textToSet = final || interim;
+        if (textToSet) {
+          if (speaker === 'person1') {
+            setTextP1(textToSet);
+          } else {
+            setTextP2(textToSet);
+          }
+        }
       };
 
       recognition.onerror = (event) => {
@@ -200,6 +253,8 @@ export default function FaceToFaceConversationSection({ langMode = 'kn' }) {
               ? 'ಮೈಕ್ರೊಫೋನ್ ಅನುಮತಿ ನಿರಾಕರಿಸಲಾಗಿದೆ. ನೀವು ಟೈಪಿಂಗ್ ಮೂಲಕವೂ ಸಂಭಾಷಣೆ ಮುಂದುವರಿಸಬಹುದು.'
               : 'Microphone permission denied. You can type directly in the text field.'
           );
+        } else if (event.error !== 'no-speech') {
+          setErrorMessage(isKn ? `ಧ್ವನಿ ದೋಷ: ${event.error}` : `Voice input error: ${event.error}`);
         }
       };
 

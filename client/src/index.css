@@ -1138,15 +1138,15 @@ body {
   }
 }
 
-/* Footer */
+/* Footer: Restored Complete Responsive Cultural System */
 .app-footer {
+  position: relative;
+  z-index: 10;
+  width: 100%;
   border-top: 2px solid var(--color-cream-border);
-  background: #FFFDF7;
-  padding: 2rem 1.25rem;
-  color: var(--color-text-muted);
-  font-size: 0.85rem;
-  text-align: center;
+  background: #FFFFFF;
   margin-top: auto;
+  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.02);
 }
 
 .footer-inner {
@@ -7807,27 +7807,11 @@ textarea:focus-visible,
   opacity: 0.7;
 }
 
-/* Cascading Hero Entrance Keyframes (Cinematic Motion Polish) */
-.hero-bg-curve-yellow {
-  animation: heroAmbientFloat 12s ease-in-out infinite alternate;
-}
-
+/* Stable Hero Background Curves (No position shifting) */
+.hero-bg-curve-yellow,
 .hero-bg-curve-red {
-  animation: heroAmbientFloat 16s ease-in-out infinite alternate-reverse;
-}
-
-@keyframes heroAmbientFloat {
-  0% {
-    transform: translate(0, 0) scale(1);
-  }
-
-  50% {
-    transform: translate(18px, -14px) scale(1.06);
-  }
-
-  100% {
-    transform: translate(0, 0) scale(1);
-  }
+  animation: none !important;
+  transform: none !important;
 }
 
 .hero-animate-badge {
@@ -11459,14 +11443,13 @@ textarea.select-input:hover,
     linear-gradient(140deg, #FFFDF8 0%, #FAF6ED 40%, #FFF3EC 100%);
 }
 
-/* 4. Layer 2: Soft Ambient Floating Glow Orbs */
+/* 4. Layer 2: Soft Ambient Fixed Glow Orbs (Stationary & Non-Disturbing) */
 .atmosphere-glow-orb {
   position: absolute;
   border-radius: 50%;
   pointer-events: none;
   filter: blur(80px);
   -webkit-filter: blur(80px);
-  will-change: transform, opacity;
   opacity: 0.85;
 }
 
@@ -11476,7 +11459,6 @@ textarea.select-input:hover,
   top: -120px;
   right: -80px;
   background: radial-gradient(circle, rgba(212, 175, 55, 0.13) 0%, rgba(245, 158, 11, 0.06) 50%, transparent 75%);
-  animation: ambientOrbFloat1 18s ease-in-out infinite alternate;
 }
 
 .orb-secondary {
@@ -11485,7 +11467,6 @@ textarea.select-input:hover,
   bottom: -100px;
   left: -80px;
   background: radial-gradient(circle, rgba(220, 38, 38, 0.08) 0%, rgba(185, 28, 28, 0.03) 50%, transparent 75%);
-  animation: ambientOrbFloat2 22s ease-in-out infinite alternate;
 }
 
 .orb-tertiary {
@@ -11494,7 +11475,6 @@ textarea.select-input:hover,
   top: 45%;
   left: 35%;
   background: radial-gradient(circle, rgba(254, 215, 102, 0.09) 0%, rgba(254, 243, 199, 0.04) 50%, transparent 75%);
-  animation: ambientOrbFloat3 26s ease-in-out infinite alternate;
 }
 
 /* Page-Specific Orb Adjustments */
@@ -11512,46 +11492,29 @@ textarea.select-input:hover,
   background: radial-gradient(circle, rgba(185, 28, 28, 0.09) 0%, rgba(220, 38, 38, 0.04) 50%, transparent 75%);
 }
 
-/* 5. Layer 3: Page-Specific SVG Art & Cultural Styling */
-
-/* A. Home: Flowing Silk-Inspired Atmosphere */
-.atmosphere-silk-wrap {
+/* 5. Layer 3: Page-Specific SVG Art & Cultural Styling (Stationary & Clear) */
+.atmosphere-silk-wrap,
+.atmosphere-soundwave-wrap,
+.atmosphere-akshara-wrap,
+.atmosphere-parchment-wrap,
+.atmosphere-speech-wrap,
+.atmosphere-heritage-wrap,
+.atmosphere-general-wrap {
   position: absolute;
   inset: 0;
   pointer-events: none;
 }
 
-.silk-ribbon-path-1 {
-  animation: silkWaveDrift1 20s ease-in-out infinite alternate;
-  transform-origin: center;
-}
-
-.silk-ribbon-path-2 {
-  animation: silkWaveDrift2 24s ease-in-out infinite alternate;
-  transform-origin: center;
-}
-
-.silk-contour-line {
-  animation: silkContourShine 14s ease-in-out infinite alternate;
-}
-
-/* B. Daily Conversations: Subtle Sound-Wave Patterns */
-.atmosphere-soundwave-wrap {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-
-.soundwave-track-1 {
-  animation: soundwaveFlow 16s ease-in-out infinite alternate;
-}
-
-.soundwave-track-2 {
-  animation: soundwaveFlow 20s ease-in-out infinite alternate-reverse;
-}
-
-.soundwave-track-3 {
-  animation: soundwaveFlow 18s ease-in-out infinite alternate;
+/* Strictly NO translation or drift animations */
+.silk-ribbon-path-1,
+.silk-ribbon-path-2,
+.silk-contour-line,
+.soundwave-track-1,
+.soundwave-track-2,
+.soundwave-track-3,
+.speech-frequency-wave {
+  animation: none !important;
+  transform: none !important;
 }
 
 /* C. Kannada Learning: Subtle Kannada Letter-Inspired Elements */
@@ -11859,12 +11822,20 @@ textarea.select-input:hover,
   }
 }
 
-/* 8. Card Visual Depth & Glassmorphism Enhancements */
+/* 8. Card Visual Depth & Soft Elevation (No tilt or position shifts) */
 .card-box,
 .feature-card-item,
 .pillar-card,
 .panel-container {
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03), 0 1px 3px rgba(0, 0, 0, 0.02) !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.03) !important;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
+}
+
+.card-box:hover,
+.feature-card-item:hover,
+.pillar-card:hover {
+  transform: none !important;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.06) !important;
 }
 
 /* 9. Mobile Responsiveness (Refined for Viewports < 768px) */

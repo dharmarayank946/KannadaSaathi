@@ -92,66 +92,19 @@ export default function VoiceTranslatorWidget({
     setErrorMsg(null);
 
     try {
-      // Relative endpoint with localhost fallback
-      let resp = null;
-      try {
-        resp = await fetch('/api/translate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            text: query,
-            sourceLang,
-            targetLang
-          })
-        });
-      } catch (netErr) {
-        resp = await fetch('http://localhost:5000/api/translate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            text: query,
-            sourceLang,
-            targetLang
-          })
-        });
-      }
-
-      if (resp && resp.ok) {
-        const data = await resp.json();
-        if (data.success && data.translatedText) {
-          const resObj = {
-            originalText: data.originalText || query,
-            translatedText: data.translatedText,
-            transliteration: data.transliteration || '',
-            engine: data.engine || (data.mode === 'gemini-live' ? 'Google Gemini AI' : 'Live Neural Engine'),
-            sourceLang,
-            targetLang
-          };
-          setResult(resObj);
-
-          // Play spoken audio in target language
-          playSpeech({
-            text: data.translatedText,
-            lang: targetLang,
-            id: `widget-${data.translatedText.slice(0, 30)}`
-          });
-          return;
-        }
-      }
-
-      // Offline dictionary fallback for verified common phrases
+      // Step 1: Check verified local spoken dictionary for instantaneous zero-latency match
       const cleanQ = query.toLowerCase().trim().replace(/[.,?!]+$/, '');
-      const match = QUICK_PHRASE_SAMPLES.find(
+      const dictMatch = QUICK_PHRASE_SAMPLES.find(
         (p) => (p[sourceLang] || '').toLowerCase().trim().replace(/[.,?!]+$/, '') === cleanQ
       );
 
-      if (match && match[targetLang]) {
-        const translated = match[targetLang];
+      if (dictMatch && dictMatch[targetLang]) {
+        const translated = dictMatch[targetLang];
         setResult({
           originalText: query,
           translatedText: translated,
           transliteration: '',
-          engine: isKn ? 'ಪರಿಶೀಲಿತ ಶಬ್ದಕೋಶ' : 'Verified Spoken Dictionary',
+          engine: isKn ? 'ಪರಿಶೀಲಿತ ಶಬ್ದಕೋಶ (Verified Spoken Dictionary)' : 'Verified Spoken Dictionary',
           sourceLang,
           targetLang
         });
@@ -160,31 +113,128 @@ export default function VoiceTranslatorWidget({
           lang: targetLang,
           id: `widget-${translated.slice(0, 30)}`
         });
+        setIsLoading(false);
+        return;
+      }
+
+      // Step 2: Try Backend API (/api/translate or localhost:5000/api/translate)
+      let translatedText = '';
+      let transliteration = '';
+      let engineName = '';
+
+      try {
+        let resp = await fetch('/api/translate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: query, sourceLang, targetLang })
+        });
+
+        if (!resp.ok) {
+          resp = await fetch('http://localhost:5000/api/translate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: query, sourceLang, targetLang })
+          });
+        }
+
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.success && data.translatedText) {
+            translatedText = data.translatedText;
+            transliteration = data.transliteration || '';
+            engineName = data.engine || 'KannadaSaathi Live Neural Engine';
+          }
+        }
+      } catch (backendErr) {
+        console.warn('Backend translation service unreachable, trying direct neural service:', backendErr);
+      }
+
+      // Step 3: Direct Neural Service Fallback (Google Neural & MyMemory)
+      if (!translatedText) {
+        try {
+          const gUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(sourceLang)}&tl=${encodeURIComponent(targetLang)}&dt=t&q=${encodeURIComponent(query)}`;
+          const gRes = await fetch(gUrl);
+          if (gRes.ok) {
+            const gData = await gRes.json();
+            if (Array.isArray(gData) && Array.isArray(gData[0])) {
+              const fullTranslation = gData[0]
+                .filter((seg) => seg && typeof seg[0] === 'string')
+                .map((seg) => seg[0])
+                .join('')
+                .trim();
+              if (fullTranslation) {
+                translatedText = fullTranslation;
+                engineName = 'Google Live Neural Gateway';
+              }
+            }
+          }
+        } catch (gErr) {
+          // Continue to MyMemory fallback
+        }
+
+        if (!translatedText) {
+          try {
+            const neuralUrl = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(query)}&langpair=${sourceLang}|${targetLang}`;
+            const neuralResp = await fetch(neuralUrl);
+            if (neuralResp.ok) {
+              const neuralData = await neuralResp.json();
+              if (neuralData.responseData && neuralData.responseData.translatedText) {
+                const cleanedNeural = neuralData.responseData.translatedText.trim();
+                if (cleanedNeural && !cleanedNeural.toUpperCase().includes('QUERY LENGTH LIMIT')) {
+                  translatedText = cleanedNeural;
+                  engineName = 'MyMemory Live Neural Translation';
+                }
+              }
+            }
+          } catch (neuralErr) {
+            console.warn('Direct neural service error:', neuralErr);
+          }
+        }
+      }
+
+      // If valid translation obtained
+      if (translatedText) {
+        const resObj = {
+          originalText: query,
+          translatedText,
+          transliteration,
+          engine: engineName,
+          sourceLang,
+          targetLang
+        };
+        setResult(resObj);
+
+        // Read aloud translated text in target language
+        playSpeech({
+          text: translatedText,
+          lang: targetLang,
+          id: `widget-${translatedText.slice(0, 30)}`
+        });
       } else {
         setErrorMsg(
           isKn
             ? 'ಅನುವಾದ ಪ್ರಕ್ರಿಯೆ ವಿಫಲವಾಗಿದೆ. ದಯವಿಟ್ಟು ಮತ್ತೊಮ್ಮೆ ಪ್ರಯತ್ನಿಸಿ.'
-            : 'Translation request could not be completed. Please try again.'
+            : 'Translation service could not be reached. Please check network and try again.'
         );
       }
     } catch (err) {
-      console.warn('Translation error:', err);
+      console.error('Translation error:', err);
       setErrorMsg(
         isKn
-          ? 'ಸರ್ವರ್ ಸಂಪರ್ಕ ಲಭ್ಯವಿಲ್ಲ. ಬ್ಯಾಕೆಂಡ್ ಚಾಲನೆಯಲ್ಲಿದೆಯೇ ಪರಿಶೀಲಿಸಿ.'
-          : 'Unable to reach backend translation service. Please verify server status.'
+          ? 'ಅನುವಾದ ಪ್ರಕ್ರಿಯೆಯಲ್ಲಿ ತಾಂತ್ರಿಕ ಅಡಚಣೆ ಉಂಟಾಗಿದೆ. ದಯವಿಟ್ಟು ಮತ್ತೊಮ್ಮೆ ಪ್ರಯತ್ನಿಸಿ.'
+          : 'Translation request failed. Please try again.'
       );
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleStartSpeechRecognition = () => {
+  const handleStartSpeechRecognition = async () => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
       setErrorMsg(
         isKn
-          ? 'ಈ ಬ್ರೌಸರ್‌ನಲ್ಲಿ Web Speech Recognition ಬೆಂಬಲವಿಲ್ಲ. ದಯವಿಟ್ಟು ಕೆಳಗೆ ಟೈಪ್ ಮಾಡಿ.'
+          ? 'ಈ ಬ್ರೌಸರ್‌ನಲ್ಲಿ Web Speech Recognition ಬೆಂಬಲವಿಲ್ಲ. ದಯವಿಟ್ಟು ನೇರವಾಗಿ ಟೈಪ್ ಮಾಡಿ.'
           : 'Web Speech recognition is not supported in this browser. Please type directly.'
       );
       return;
@@ -199,26 +249,60 @@ export default function VoiceTranslatorWidget({
     }
 
     setErrorMsg(null);
+
+    // Explicitly prompt for microphone access via getUserMedia if available
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach((track) => track.stop());
+      } catch (permErr) {
+        if (permErr.name === 'NotAllowedError' || permErr.name === 'PermissionDeniedError') {
+          setErrorMsg(
+            isKn
+              ? 'ಮೈಕ್ರೊಫೋನ್ ಅನುಮತಿ ನಿರಾಕರಿಸಲಾಗಿದೆ. ಬ್ರೌಸರ್ ಸೆಟ್ಟಿಂಗ್ಸ್‌ನಲ್ಲಿ ಮೈಕ್ ಅನುಮತಿಸಿ.'
+              : 'Microphone permission denied. Please allow microphone access in your browser settings.'
+          );
+          setIsListening(false);
+          return;
+        }
+      }
+    }
+
     setIsListening(true);
 
     try {
       const recognition = new SpeechRecognition();
       recognitionRef.current = recognition;
 
-      const langObj = SUPPORTED_LANGUAGES.find(l => l.code === sourceLang);
-      recognition.lang = langObj?.bcp47 || (sourceLang === 'kn' ? 'kn-IN' : 'en-US');
+      const langObj = SUPPORTED_LANGUAGES.find((l) => l.code === sourceLang);
+      recognition.lang = langObj?.bcp47 || (sourceLang === 'kn' ? 'kn-IN' : 'en-IN');
       recognition.continuous = false;
-      recognition.interimResults = false;
+      recognition.interimResults = true;
 
       recognition.onstart = () => {
         setIsListening(true);
       };
 
       recognition.onresult = (e) => {
-        const transcript = e.results[0][0].transcript;
-        if (transcript) {
-          setInputText(transcript);
-          handleTranslate(transcript);
+        let interim = '';
+        let final = '';
+
+        for (let i = e.resultIndex; i < e.results.length; ++i) {
+          if (e.results[i].isFinal) {
+            final += e.results[i][0].transcript;
+          } else {
+            interim += e.results[i][0].transcript;
+          }
+        }
+
+        if (interim) {
+          setInputText(interim);
+        }
+
+        if (final && final.trim()) {
+          const cleanFinal = final.trim();
+          setInputText(cleanFinal);
+          handleTranslate(cleanFinal);
         }
       };
 
@@ -231,7 +315,15 @@ export default function VoiceTranslatorWidget({
               ? 'ಮೈಕ್ರೊಫೋನ್ ಅನುಮತಿ ನಿರಾಕರಿಸಲಾಗಿದೆ. ಬ್ರೌಸರ್ ಸೆಟ್ಟಿಂಗ್ಸ್‌ನಲ್ಲಿ ಮೈಕ್ ಅನುಮತಿಸಿ.'
               : 'Microphone permission denied. Please allow microphone access in browser settings.'
           );
-        } else if (e.error !== 'no-speech') {
+        } else if (e.error === 'no-speech') {
+          // Soft notice, no harsh error banner
+        } else if (e.error === 'network') {
+          setErrorMsg(
+            isKn
+              ? 'ಧ್ವನಿ ಗುರುತಿಸುವಿಕೆಗಾಗಿ ನೆಟ್‌ವರ್ಕ್ ಸಂಪರ್ಕ ಪರಿಶೀಲಿಸಿ.'
+              : 'Network error occurred during speech recognition. Please check your connection.'
+          );
+        } else {
           setErrorMsg(isKn ? `ಧ್ವನಿ ದೋಷ: ${e.error}` : `Voice input error: ${e.error}`);
         }
       };

@@ -3,10 +3,12 @@
   "version": "1.0.0",
   "description": "KannadaSaathi — Real-Time Kannada Life Assistant (See • Speak • Understand • Solve)",
   "scripts": {
+    "build": "npm --prefix client run build",
     "dev:server": "npm --prefix server run dev",
     "dev:client": "npm --prefix client run dev",
     "build:client": "npm --prefix client run build",
     "start:server": "npm --prefix server start",
+    "start": "node server/index.js",
     "test": "node server/test-step7-workflows.js"
   },
   "keywords": ["kannada", "assistant", "multimodal", "voice", "weather", "karnataka"],

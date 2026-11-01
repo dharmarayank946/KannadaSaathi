@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useKannadaSpeech } from '../../utils/kannadaSpeech';
+import RajyotsavaLiveTracker from '../common/RajyotsavaLiveTracker';
 import {
   ArrowLeft,
   Search,
@@ -661,6 +662,9 @@ export default function HeritageSection({ onBackToHome, langMode = 'kn', initial
               </div>
             )}
           </div>
+
+          {/* Real-Time Live Date-Accurate Kannada Rajyotsava Celebration & Countdown Tracker */}
+          <RajyotsavaLiveTracker langMode={langMode} />
 
           {/* Speech Audio Notice Banner if active or unsupported */}
           {speechNotice && (

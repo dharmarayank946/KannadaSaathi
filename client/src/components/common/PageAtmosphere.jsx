@@ -368,20 +368,6 @@ const PageAtmosphere = ({ currentSection = 'home' }) => {
           </svg>
         </div>
       )}
-
-      {/* ------------------------------------------------------------- */}
-      {/* LAYER 4: Delicate Floating Golden Particles (Golden Dust)     */}
-      {/* ------------------------------------------------------------- */}
-      <div className="atmosphere-particles-wrap">
-        <div className="floating-dust-particle p1" />
-        <div className="floating-dust-particle p2" />
-        <div className="floating-dust-particle p3" />
-        <div className="floating-dust-particle p4" />
-        <div className="floating-dust-particle p5" />
-        <div className="floating-dust-particle p6" />
-        <div className="floating-dust-particle p7" />
-        <div className="floating-dust-particle p8" />
-      </div>
     </div>
   );
 };
