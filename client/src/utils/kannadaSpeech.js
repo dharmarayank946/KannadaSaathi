@@ -362,60 +362,18 @@ function speakViaWebSpeech({ text, voice, langCode, rate = 1.0, onStart, onEnd, 
 }
 
 /**
- * Fast Audio Streaming Fallback: Backend /api/tts -> Direct Google TTS without Referer -> WebSpeech
+ * Fast Audio Streaming: Direct Google TTS with Referrer stripping -> Backend /api/tts -> WebSpeech
  */
 function fallbackToAudioStreaming({ text, lang, id, rate, onStart, onEnd, onError }) {
-  // Fast check: probe /api/tts with a responsive 1.5s timeout to protect transient user gesture activation
-  const tryEndpoint = (url) => {
-    return new Promise((resolve, reject) => {
-      const audio = new Audio();
-      audio.referrerPolicy = 'no-referrer';
-      let resolved = false;
-
-      const timer = setTimeout(() => {
-        if (!resolved) {
-          resolved = true;
-          audio.src = '';
-          reject(new Error('Timeout'));
-        }
-      }, 1500);
-
-      audio.oncanplay = () => {
-        if (!resolved) {
-          resolved = true;
-          clearTimeout(timer);
-          resolve(audio);
-        }
-      };
-
-      audio.onerror = () => {
-        if (!resolved) {
-          resolved = true;
-          clearTimeout(timer);
-          reject(new Error('Audio load failed'));
-        }
-      };
-
-      audio.src = url;
-      audio.load();
-    });
-  };
-
-  const backendUrl = `/api/tts?text=${encodeURIComponent(text)}&lang=${encodeURIComponent(lang)}`;
-
-  tryEndpoint(backendUrl)
-    .then((audio) => {
-      attachAndPlayAudioElement(audio, id, onStart, onEnd, onError);
-    })
-    .catch(() => {
-      // Backend not running or timed out -> Play directly via Google Translate TTS with no-referrer
-      playDirectGoogleTTS({ text, lang, id, onStart, onEnd, onError });
-    });
+  // Directly stream authentic Google Translate TTS with referrerPolicy = 'no-referrer'
+  // Synchronous invocation inside the user gesture ensures zero latency and complies with autoplay policy.
+  playDirectGoogleTTS({ text, lang, id, onStart, onEnd, onError });
 }
 
 /**
  * Direct client-side HTML5 Audio via Google Translate TTS
- * Uses audio.referrerPolicy = 'no-referrer' to prevent Google's 404 blocking
+ * Uses audio.referrerPolicy = 'no-referrer' to prevent Google's 404 blocking.
+ * Never sets crossOrigin = 'anonymous' because Google TTS does not send CORS headers.
  */
 function playDirectGoogleTTS({ text, lang, id, onStart, onEnd, onError }) {
   const chunks = splitIntoAudioChunks(text, 130);
@@ -439,7 +397,7 @@ function playDirectGoogleTTS({ text, lang, id, onStart, onEnd, onError }) {
 
     const audio = new Audio();
     audio.referrerPolicy = 'no-referrer';
-    audio.crossOrigin = 'anonymous';
+    // IMPORTANT: Do NOT set audio.crossOrigin = 'anonymous' as Google TTS does not return CORS headers
     currentAudioElement = audio;
 
     audio.onplay = () => {
@@ -459,8 +417,8 @@ function playDirectGoogleTTS({ text, lang, id, onStart, onEnd, onError }) {
     };
 
     audio.onerror = (e) => {
-      console.warn('Direct Google TTS chunk load failed, trying WebSpeech generic:', e);
-      playGenericWebSpeechFallback({ text, lang, id, onStart, onEnd, onError });
+      console.warn('Direct Google TTS chunk load failed, trying backend /api/tts:', e);
+      tryBackendTTSFallback({ text, lang, id, onStart, onEnd, onError });
     };
 
     audio.src = directUrl;
@@ -468,12 +426,47 @@ function playDirectGoogleTTS({ text, lang, id, onStart, onEnd, onError }) {
     if (playPromise !== undefined) {
       playPromise.catch((err) => {
         console.warn('Direct audio play error:', err);
-        playGenericWebSpeechFallback({ text, lang, id, onStart, onEnd, onError });
+        tryBackendTTSFallback({ text, lang, id, onStart, onEnd, onError });
       });
     }
   };
 
   playNextChunk();
+}
+
+/**
+ * Secondary fallback to local/deployed backend /api/tts endpoint
+ */
+function tryBackendTTSFallback({ text, lang, id, onStart, onEnd, onError }) {
+  const backendUrl = `/api/tts?text=${encodeURIComponent(text)}&lang=${encodeURIComponent(lang)}`;
+  const audio = new Audio();
+  audio.referrerPolicy = 'no-referrer';
+
+  audio.onplay = () => {
+    isCurrentlyLoading = false;
+    isCurrentlySpeaking = true;
+    notifyListeners();
+    onStart?.();
+  };
+
+  audio.onended = () => {
+    stopSpeech();
+    onEnd?.();
+  };
+
+  audio.onerror = () => {
+    console.warn('Backend TTS failed, falling back to system WebSpeech');
+    playGenericWebSpeechFallback({ text, lang, id, onStart, onEnd, onError });
+  };
+
+  audio.src = backendUrl;
+  currentAudioElement = audio;
+  const p = audio.play();
+  if (p !== undefined) {
+    p.catch(() => {
+      playGenericWebSpeechFallback({ text, lang, id, onStart, onEnd, onError });
+    });
+  }
 }
 
 /**

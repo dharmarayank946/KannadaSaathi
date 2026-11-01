@@ -14,6 +14,7 @@ import {
   X
 } from 'lucide-react';
 import { playSpeech, stopSpeech, useKannadaSpeech } from '../utils/kannadaSpeech';
+import { translateText } from '../utils/translationService';
 
 const SUPPORTED_LANGUAGES = [
   { code: 'en', nameKn: 'ಆಂಗ್ಲ (English)', nameEn: 'English', bcp47: 'en-IN', flag: '🌐' },
@@ -56,6 +57,8 @@ export default function VoiceTranslatorWidget({
   const [copied, setCopied] = useState(false);
 
   const recognitionRef = useRef(null);
+  const lastTranscriptRef = useRef('');
+  const hasTranslatedRef = useRef(false);
 
   // Clean up recognition on unmount
   useEffect(() => {
@@ -92,113 +95,13 @@ export default function VoiceTranslatorWidget({
     setErrorMsg(null);
 
     try {
-      // Step 1: Check verified local spoken dictionary for instantaneous zero-latency match
-      const cleanQ = query.toLowerCase().trim().replace(/[.,?!]+$/, '');
-      const dictMatch = QUICK_PHRASE_SAMPLES.find(
-        (p) => (p[sourceLang] || '').toLowerCase().trim().replace(/[.,?!]+$/, '') === cleanQ
-      );
-
-      if (dictMatch && dictMatch[targetLang]) {
-        const translated = dictMatch[targetLang];
-        setResult({
-          originalText: query,
-          translatedText: translated,
-          transliteration: '',
-          engine: isKn ? 'ಪರಿಶೀಲಿತ ಶಬ್ದಕೋಶ (Verified Spoken Dictionary)' : 'Verified Spoken Dictionary',
-          sourceLang,
-          targetLang
-        });
-        playSpeech({
-          text: translated,
-          lang: targetLang,
-          id: `widget-${translated.slice(0, 30)}`
-        });
-        setIsLoading(false);
-        return;
-      }
-
-      // Step 2: Try Backend API (/api/translate or localhost:5000/api/translate)
-      let translatedText = '';
-      let transliteration = '';
-      let engineName = '';
-
-      try {
-        let resp = await fetch('/api/translate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: query, sourceLang, targetLang })
-        });
-
-        if (!resp.ok) {
-          resp = await fetch('http://localhost:5000/api/translate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: query, sourceLang, targetLang })
-          });
-        }
-
-        if (resp.ok) {
-          const data = await resp.json();
-          if (data.success && data.translatedText) {
-            translatedText = data.translatedText;
-            transliteration = data.transliteration || '';
-            engineName = data.engine || 'KannadaSaathi Live Neural Engine';
-          }
-        }
-      } catch (backendErr) {
-        console.warn('Backend translation service unreachable, trying direct neural service:', backendErr);
-      }
-
-      // Step 3: Direct Neural Service Fallback (Google Neural & MyMemory)
-      if (!translatedText) {
-        try {
-          const gUrl = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(sourceLang)}&tl=${encodeURIComponent(targetLang)}&dt=t&q=${encodeURIComponent(query)}`;
-          const gRes = await fetch(gUrl);
-          if (gRes.ok) {
-            const gData = await gRes.json();
-            if (Array.isArray(gData) && Array.isArray(gData[0])) {
-              const fullTranslation = gData[0]
-                .filter((seg) => seg && typeof seg[0] === 'string')
-                .map((seg) => seg[0])
-                .join('')
-                .trim();
-              if (fullTranslation) {
-                translatedText = fullTranslation;
-                engineName = 'Google Live Neural Gateway';
-              }
-            }
-          }
-        } catch (gErr) {
-          // Continue to MyMemory fallback
-        }
-
-        if (!translatedText) {
-          try {
-            const neuralUrl = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(query)}&langpair=${sourceLang}|${targetLang}`;
-            const neuralResp = await fetch(neuralUrl);
-            if (neuralResp.ok) {
-              const neuralData = await neuralResp.json();
-              if (neuralData.responseData && neuralData.responseData.translatedText) {
-                const cleanedNeural = neuralData.responseData.translatedText.trim();
-                if (cleanedNeural && !cleanedNeural.toUpperCase().includes('QUERY LENGTH LIMIT')) {
-                  translatedText = cleanedNeural;
-                  engineName = 'MyMemory Live Neural Translation';
-                }
-              }
-            }
-          } catch (neuralErr) {
-            console.warn('Direct neural service error:', neuralErr);
-          }
-        }
-      }
-
-      // If valid translation obtained
-      if (translatedText) {
+      const res = await translateText(query, sourceLang, targetLang);
+      if (res && res.translatedText) {
         const resObj = {
           originalText: query,
-          translatedText,
-          transliteration,
-          engine: engineName,
+          translatedText: res.translatedText,
+          transliteration: res.transliteration || '',
+          engine: res.engine,
           sourceLang,
           targetLang
         };
@@ -206,9 +109,9 @@ export default function VoiceTranslatorWidget({
 
         // Read aloud translated text in target language
         playSpeech({
-          text: translatedText,
+          text: res.translatedText,
           lang: targetLang,
-          id: `widget-${translatedText.slice(0, 30)}`
+          id: `widget-${res.translatedText.slice(0, 30)}`
         });
       } else {
         setErrorMsg(
@@ -229,7 +132,7 @@ export default function VoiceTranslatorWidget({
     }
   };
 
-  const handleStartSpeechRecognition = async () => {
+  const handleStartSpeechRecognition = () => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
       setErrorMsg(
@@ -249,26 +152,8 @@ export default function VoiceTranslatorWidget({
     }
 
     setErrorMsg(null);
-
-    // Explicitly prompt for microphone access via getUserMedia if available
-    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        stream.getTracks().forEach((track) => track.stop());
-      } catch (permErr) {
-        if (permErr.name === 'NotAllowedError' || permErr.name === 'PermissionDeniedError') {
-          setErrorMsg(
-            isKn
-              ? 'ಮೈಕ್ರೊಫೋನ್ ಅನುಮತಿ ನಿರಾಕರಿಸಲಾಗಿದೆ. ಬ್ರೌಸರ್ ಸೆಟ್ಟಿಂಗ್ಸ್‌ನಲ್ಲಿ ಮೈಕ್ ಅನುಮತಿಸಿ.'
-              : 'Microphone permission denied. Please allow microphone access in your browser settings.'
-          );
-          setIsListening(false);
-          return;
-        }
-      }
-    }
-
-    setIsListening(true);
+    lastTranscriptRef.current = '';
+    hasTranslatedRef.current = false;
 
     try {
       const recognition = new SpeechRecognition();
@@ -278,9 +163,12 @@ export default function VoiceTranslatorWidget({
       recognition.lang = langObj?.bcp47 || (sourceLang === 'kn' ? 'kn-IN' : 'en-IN');
       recognition.continuous = false;
       recognition.interimResults = true;
+      recognition.maxAlternatives = 1;
 
       recognition.onstart = () => {
         setIsListening(true);
+        lastTranscriptRef.current = '';
+        hasTranslatedRef.current = false;
       };
 
       recognition.onresult = (e) => {
@@ -295,13 +183,15 @@ export default function VoiceTranslatorWidget({
           }
         }
 
-        if (interim) {
-          setInputText(interim);
+        const recognizedText = (final || interim || '').trim();
+        if (recognizedText) {
+          lastTranscriptRef.current = recognizedText;
+          setInputText(recognizedText);
         }
 
         if (final && final.trim()) {
           const cleanFinal = final.trim();
-          setInputText(cleanFinal);
+          hasTranslatedRef.current = true;
           handleTranslate(cleanFinal);
         }
       };
@@ -312,11 +202,11 @@ export default function VoiceTranslatorWidget({
         if (e.error === 'not-allowed') {
           setErrorMsg(
             isKn
-              ? 'ಮೈಕ್ರೊಫೋನ್ ಅನುಮತಿ ನಿರಾಕರಿಸಲಾಗಿದೆ. ಬ್ರೌಸರ್ ಸೆಟ್ಟಿಂಗ್ಸ್‌ನಲ್ಲಿ ಮೈಕ್ ಅನುಮತಿಸಿ.'
-              : 'Microphone permission denied. Please allow microphone access in browser settings.'
+              ? 'ಮೈಕ್ರೊಫೋನ್ ಅನುಮತಿ ನಿರಾಕರಿಸಲಾಗಿದೆ. ಬ್ರೌಸರ್ ವಿಳಾಸ ಪಟ್ಟಿಯಲ್ಲಿರುವ (address bar) ಲಾಕ್/ಟ್ಯೂನ್ ಐಕಾನ್ ಕ್ಲಿಕ್ ಮಾಡಿ ಮೈಕ್ ಅನುಮತಿಸಿ.'
+              : 'Microphone permission denied. Click the lock/tune icon in your browser address bar to allow microphone access.'
           );
         } else if (e.error === 'no-speech') {
-          // Soft notice, no harsh error banner
+          // Soft notice: user simply paused
         } else if (e.error === 'network') {
           setErrorMsg(
             isKn
@@ -330,6 +220,11 @@ export default function VoiceTranslatorWidget({
 
       recognition.onend = () => {
         setIsListening(false);
+        // If speech ended with accumulated transcript that wasn't finalized yet, translate it now
+        if (!hasTranslatedRef.current && lastTranscriptRef.current) {
+          hasTranslatedRef.current = true;
+          handleTranslate(lastTranscriptRef.current);
+        }
       };
 
       recognition.start();

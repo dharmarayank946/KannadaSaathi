@@ -532,14 +532,17 @@ export default function GamesSection({ onBackToHome, langMode }) {
       recognitionRef.current = recognition;
       recognition.lang = 'kn-IN';
       recognition.continuous = false;
-      recognition.interimResults = false;
+      recognition.interimResults = true;
+      recognition.maxAlternatives = 1;
 
-      recognition.onresult = (e) => {
-        const text = e.results[0][0].transcript;
-        setSpokenTranscript(text);
-        const currentTarget = listenDrills[listenDrillIdx].text;
+      let lastSpokenText = '';
+      let evaluated = false;
 
-        const cleanA = text.replace(/[,.?!]/g, '').trim();
+      const evaluateSpeech = (spoken) => {
+        if (evaluated || !spoken) return;
+        evaluated = true;
+        const currentTarget = listenDrills[listenDrillIdx]?.text || '';
+        const cleanA = spoken.replace(/[,.?!]/g, '').trim();
         const cleanB = currentTarget.replace(/[,.?!]/g, '').trim();
 
         if (cleanA === cleanB || cleanB.includes(cleanA) || cleanA.includes(cleanB)) {
@@ -552,22 +555,57 @@ export default function GamesSection({ onBackToHome, langMode }) {
           setSpeakFeedback({
             type: 'partial',
             text: isKn
-              ? `ಧ್ವನಿ ಗ್ರಹಿಸಿದ್ದು: "${text}". ಮತ್ತೊಮ್ಮೆ ಸ್ಪಷ್ಟವಾಗಿ ಹೇಳಿ ಪ್ರಯತ್ನಿಸಿ.`
-              : `Detected: "${text}". Try speaking clearly once more.`
+              ? `ಧ್ವನಿ ಗ್ರಹಿಸಿದ್ದು: "${spoken}". ಮತ್ತೊಮ್ಮೆ ಸ್ಪಷ್ಟವಾಗಿ ಹೇಳಿ ಪ್ರಯತ್ನಿಸಿ.`
+              : `Detected: "${spoken}". Try speaking clearly once more.`
           });
+        }
+      };
+
+      recognition.onresult = (e) => {
+        let interim = '';
+        let final = '';
+
+        for (let i = e.resultIndex; i < e.results.length; ++i) {
+          if (e.results[i].isFinal) {
+            final += e.results[i][0].transcript;
+          } else {
+            interim += e.results[i][0].transcript;
+          }
+        }
+
+        const currentText = (final || interim || '').trim();
+        if (currentText) {
+          lastSpokenText = currentText;
+          setSpokenTranscript(currentText);
+        }
+
+        if (final && final.trim()) {
+          evaluateSpeech(final.trim());
         }
       };
 
       recognition.onerror = (e) => {
         setIsRecognizing(false);
-        setSpeakFeedback({
-          type: 'error',
-          text: isKn ? `ಧ್ವನಿ ದೋಷ: ${e.error}. ಮೈಕ್ ಅನುಮತಿ ಪರಿಶೀಲಿಸಿ.` : `Microphone error: ${e.error}`
-        });
+        if (e.error === 'not-allowed') {
+          setSpeakFeedback({
+            type: 'error',
+            text: isKn
+              ? 'ಮೈಕ್ರೊಫೋನ್ ಅನುಮತಿ ನಿರಾಕರಿಸಲಾಗಿದೆ. ಬ್ರೌಸರ್ ವಿಳಾಸ ಪಟ್ಟಿಯಲ್ಲಿ ಮೈಕ್ ಅನುಮತಿಸಿ.'
+              : 'Microphone permission denied. Allow microphone access in your browser address bar.'
+          });
+        } else if (e.error !== 'no-speech') {
+          setSpeakFeedback({
+            type: 'error',
+            text: isKn ? `ಧ್ವನಿ ದೋಷ: ${e.error}.` : `Microphone error: ${e.error}`
+          });
+        }
       };
 
       recognition.onend = () => {
         setIsRecognizing(false);
+        if (!evaluated && lastSpokenText) {
+          evaluateSpeech(lastSpokenText);
+        }
       };
 
       recognition.start();

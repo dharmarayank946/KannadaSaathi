@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import SectionHeader from '../layout/SectionHeader';
 import { playSpeech, stopSpeech } from '../../utils/kannadaSpeech';
+import { translateText } from '../../utils/translationService';
 import {
   Languages,
   Mic,
@@ -143,6 +144,10 @@ export default function TranslatorSection({ onBackToHome, langMode, serverStatus
   const directRecognitionRef = useRef(null);
   const duoRecognitionRef = useRef(null);
   const chatBottomRef = useRef(null);
+  const directLastTranscriptRef = useRef('');
+  const directHasTranslatedRef = useRef(false);
+  const duoLastTranscriptRef = useRef('');
+  const duoHasTranslatedRef = useRef(false);
 
   // Scroll to latest message in duo mode
   useEffect(() => {
@@ -229,83 +234,21 @@ export default function TranslatorSection({ onBackToHome, langMode, serverStatus
     setDirectError(null);
 
     try {
-      let response = null;
-      let translatedText = '';
-      let transliteration = '';
-      let engineName = '';
-      let modeName = '';
-
-      try {
-        response = await fetch('/api/translate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            text: textToTranslate,
-            sourceLang: directSourceLang,
-            targetLang: directTargetLang
-          })
-        });
-
-        if (!response.ok) {
-          response = await fetch('http://localhost:5000/api/translate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              text: textToTranslate,
-              sourceLang: directSourceLang,
-              targetLang: directTargetLang
-            })
-          });
-        }
-
-        if (response && response.ok) {
-          const data = await response.json();
-          if (data.success && data.translatedText) {
-            translatedText = data.translatedText;
-            transliteration = data.transliteration || '';
-            engineName = data.engine || 'KannadaSaathi Neural Engine';
-            modeName = data.mode || 'live-neural';
-          }
-        }
-      } catch (e) {
-        console.warn('Backend translation failed, trying direct neural service:', e);
-      }
-
-      // Direct neural service fallback
-      if (!translatedText) {
-        try {
-          const neuralUrl = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(textToTranslate)}&langpair=${directSourceLang}|${directTargetLang}`;
-          const nResp = await fetch(neuralUrl);
-          if (nResp.ok) {
-            const nData = await nResp.json();
-            if (nData.responseData && nData.responseData.translatedText) {
-              const resText = nData.responseData.translatedText.trim();
-              if (resText && !resText.toUpperCase().includes('QUERY LENGTH LIMIT')) {
-                translatedText = resText;
-                engineName = 'MyMemory Live Neural Translation';
-                modeName = 'direct-neural';
-              }
-            }
-          }
-        } catch (nErr) {
-          console.warn('Direct neural translation service failed:', nErr);
-        }
-      }
-
-      if (translatedText) {
+      const res = await translateText(textToTranslate, directSourceLang, directTargetLang);
+      if (res && res.translatedText) {
         setDirectResult({
           originalText: textToTranslate,
-          translatedText,
-          transliteration,
-          engine: engineName,
+          translatedText: res.translatedText,
+          transliteration: res.transliteration || '',
+          engine: res.engine,
           sourceLang: directSourceLang,
           targetLang: directTargetLang,
-          mode: modeName
+          mode: 'live'
         });
 
         // Auto-speak in target language
         if (autoSpeak) {
-          speakText(translatedText, directTargetLang);
+          speakText(res.translatedText, directTargetLang);
         }
       } else {
         const errorMsg = isKn ? 'ಅನುವಾದ ಪ್ರಕ್ರಿಯೆ ವಿಫಲವಾಗಿದೆ. ದಯವಿಟ್ಟು ಮತ್ತೊಮ್ಮೆ ಪ್ರಯತ್ನಿಸಿ.' : 'Translation service could not be reached. Please check connection and try again.';
@@ -313,7 +256,7 @@ export default function TranslatorSection({ onBackToHome, langMode, serverStatus
         setDirectResult(null);
       }
     } catch (err) {
-      console.warn('Direct translation network error:', err);
+      console.warn('Direct translation error:', err);
       // Fallback check in local preset categories
       let localFallback = null;
       const clean = textToTranslate.toLowerCase().trim().replace(/[.,?!]+$/, '');
@@ -342,8 +285,8 @@ export default function TranslatorSection({ onBackToHome, langMode, serverStatus
       } else {
         setDirectError(
           isKn
-            ? 'ಸರ್ವರ್ ಸಂಪರ್ಕ ಲಭ್ಯವಿಲ್ಲ (ದಯವಿಟ್ಟು ಬ್ಯಾಕೆಂಡ್ ಸರ್ವರ್ ಚಾಲನೆಯಲ್ಲಿದೆಯೇ ಪರಿಶೀಲಿಸಿ).'
-            : 'Unable to reach backend translation server on port 5000. Please ensure the backend is running.'
+            ? 'ಅನುವಾದ ಪ್ರಕ್ರಿಯೆಯಲ್ಲಿ ತಾಂತ್ರಿಕ ಅಡಚಣೆ ಉಂಟಾಗಿದೆ. ದಯವಿಟ್ಟು ಮತ್ತೊಮ್ಮೆ ಪ್ರಯತ್ನಿಸಿ.'
+            : 'Translation request failed. Please try again.'
         );
       }
     } finally {
@@ -371,7 +314,8 @@ export default function TranslatorSection({ onBackToHome, langMode, serverStatus
     }
 
     setDirectError(null);
-    setIsDirectMicListening(true);
+    directLastTranscriptRef.current = '';
+    directHasTranslatedRef.current = false;
 
     try {
       const recognition = new SpeechRecognition();
@@ -380,18 +324,37 @@ export default function TranslatorSection({ onBackToHome, langMode, serverStatus
       const langObj = SUPPORTED_LANGUAGES.find(l => l.code === directSourceLang);
       recognition.lang = langObj?.bcp47 || (directSourceLang === 'kn' ? 'kn-IN' : 'en-IN');
       recognition.continuous = false;
-      recognition.interimResults = false;
+      recognition.interimResults = true;
       recognition.maxAlternatives = 1;
 
       recognition.onstart = () => {
         setIsDirectMicListening(true);
+        directLastTranscriptRef.current = '';
+        directHasTranslatedRef.current = false;
       };
 
       recognition.onresult = (e) => {
-        const transcript = e.results[0][0].transcript;
-        if (transcript) {
-          setDirectInputText(transcript);
-          handleExecuteDirectTranslation(transcript);
+        let interim = '';
+        let final = '';
+
+        for (let i = e.resultIndex; i < e.results.length; ++i) {
+          if (e.results[i].isFinal) {
+            final += e.results[i][0].transcript;
+          } else {
+            interim += e.results[i][0].transcript;
+          }
+        }
+
+        const recognizedText = (final || interim || '').trim();
+        if (recognizedText) {
+          directLastTranscriptRef.current = recognizedText;
+          setDirectInputText(recognizedText);
+        }
+
+        if (final && final.trim()) {
+          const cleanFinal = final.trim();
+          directHasTranslatedRef.current = true;
+          handleExecuteDirectTranslation(cleanFinal);
         }
       };
 
@@ -401,15 +364,11 @@ export default function TranslatorSection({ onBackToHome, langMode, serverStatus
         if (e.error === 'not-allowed') {
           setDirectError(
             isKn
-              ? 'ಮೈಕ್ರೊಫೋನ್ ಅನುಮತಿ ನಿರಾಕರಿಸಲಾಗಿದೆ. ಬ್ರೌಸರ್ ಸೆಟ್ಟಿಂಗ್ಸ್‌ನಲ್ಲಿ ಮೈಕ್ ಬಳಕೆಗೆ ಅನುಮತಿ ನೀಡಿ.'
+              ? 'ಮೈಕ್ರೊಫೋನ್ ಅನುಮತಿ ನಿರಾಕರಿಸಲಾಗಿದೆ. ಬ್ರೌಸರ್ ವಿಳಾಸ ಪಟ್ಟಿಯಲ್ಲಿರುವ (address bar) ಲಾಕ್/ಟ್ಯೂನ್ ಐಕಾನ್ ಕ್ಲಿಕ್ ಮಾಡಿ ಮೈಕ್ ಬಳಕೆಗೆ ಅನುಮತಿ ನೀಡಿ.'
               : 'Microphone permission was denied. Please allow microphone access in your browser address bar.'
           );
         } else if (e.error === 'no-speech') {
-          setDirectError(
-            isKn
-              ? 'ಯಾವುದೇ ಧ್ವನಿ ಕೇಳಿಸಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಮತ್ತೊಮ್ಮೆ ಮಾತನಾಡಿ.'
-              : 'No speech was detected. Please tap the mic and speak clearly.'
-          );
+          // Soft notice, no error
         } else {
           setDirectError(
             isKn
@@ -421,6 +380,10 @@ export default function TranslatorSection({ onBackToHome, langMode, serverStatus
 
       recognition.onend = () => {
         setIsDirectMicListening(false);
+        if (!directHasTranslatedRef.current && directLastTranscriptRef.current) {
+          directHasTranslatedRef.current = true;
+          handleExecuteDirectTranslation(directLastTranscriptRef.current);
+        }
       };
 
       recognition.start();
@@ -483,61 +446,10 @@ export default function TranslatorSection({ onBackToHome, langMode, serverStatus
     const nextSpeaker = isP1 ? 'person2' : 'person1';
 
     try {
-      let response = null;
-      try {
-        response = await fetch('/api/translate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            text: trimmed,
-            sourceLang,
-            targetLang
-          })
-        });
-      } catch (err) {
-        response = await fetch('http://localhost:5000/api/translate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            text: trimmed,
-            sourceLang,
-            targetLang
-          })
-        });
-      }
-
-      let translated = '';
-      let modeUsed = 'live';
-      let transliteration = '';
-
-      if (response && response.ok) {
-        const data = await response.json();
-        if (data.success && data.translatedText) {
-          translated = data.translatedText;
-          modeUsed = data.mode || 'live';
-          transliteration = data.transliteration || '';
-        }
-      }
-
-      // Direct neural translation fallback
-      if (!translated) {
-        try {
-          const neuralUrl = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(trimmed)}&langpair=${sourceLang}|${targetLang}`;
-          const nResp = await fetch(neuralUrl);
-          if (nResp.ok) {
-            const nData = await nResp.json();
-            if (nData.responseData && nData.responseData.translatedText) {
-              const resText = nData.responseData.translatedText.trim();
-              if (resText && !resText.toUpperCase().includes('QUERY LENGTH LIMIT')) {
-                translated = resText;
-                modeUsed = 'neural-direct';
-              }
-            }
-          }
-        } catch (nErr) {
-          console.warn('Duo direct neural translation error:', nErr);
-        }
-      }
+      const res = await translateText(trimmed, sourceLang, targetLang);
+      let translated = res?.translatedText || '';
+      let modeUsed = res?.engine || 'live';
+      let transliteration = res?.transliteration || '';
 
       if (!translated) {
         translated = isKn ? 'ಅನುವಾದ ಪ್ರಕ್ರಿಯೆಯಲ್ಲಿ ತೊಂದರೆ' : 'Translation service unavailable';
@@ -583,8 +495,8 @@ export default function TranslatorSection({ onBackToHome, langMode, serverStatus
       console.warn('Duo translation error:', err);
       setDuoSpeechError(
         isKn
-          ? 'ಬ್ಯಾಕೆಂಡ್ ಸರ್ವರ್ ಸಂಪರ್ಕದಲ್ಲಿ ತೊಂದರೆಯಾಗಿದೆ.'
-          : 'Unable to connect to backend translation server.'
+          ? 'ಅನುವಾದ ಪ್ರಕ್ರಿಯೆಯಲ್ಲಿ ತಾಂತ್ರಿಕ ಅಡಚಣೆ ಉಂಟಾಗಿದೆ.'
+          : 'Translation service error. Please try again.'
       );
       setDuoStatus('idle');
     }
@@ -619,7 +531,8 @@ export default function TranslatorSection({ onBackToHome, langMode, serverStatus
     setIsDuoActive(true);
     setCurrentTurn(speaker);
     setDuoSpeechError(null);
-    setDuoStatus('listening');
+    duoLastTranscriptRef.current = '';
+    duoHasTranslatedRef.current = false;
 
     try {
       const recognition = new SpeechRecognition();
@@ -629,22 +542,41 @@ export default function TranslatorSection({ onBackToHome, langMode, serverStatus
       const langConfig = SUPPORTED_LANGUAGES.find(l => l.code === langCode);
       recognition.lang = langConfig?.bcp47 || (langCode === 'kn' ? 'kn-IN' : 'en-IN');
       recognition.continuous = false;
-      recognition.interimResults = false;
+      recognition.interimResults = true;
       recognition.maxAlternatives = 1;
 
       recognition.onstart = () => {
         setDuoStatus('listening');
+        duoLastTranscriptRef.current = '';
+        duoHasTranslatedRef.current = false;
       };
 
       recognition.onresult = (e) => {
-        const transcript = e.results[0]?.[0]?.transcript;
-        if (transcript) {
-          handleTranslateDuoMessage(transcript, speaker);
-        } else {
-          setDuoStatus('idle');
-          setDuoSpeechError(
-            isKn ? 'ಧ್ವನಿ ಗುರುತಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ. ಮತ್ತೊಮ್ಮೆ ಪ್ರಯತ್ನಿಸಿ.' : 'Could not recognise speech. Please try again.'
-          );
+        let interim = '';
+        let final = '';
+
+        for (let i = e.resultIndex; i < e.results.length; ++i) {
+          if (e.results[i].isFinal) {
+            final += e.results[i][0].transcript;
+          } else {
+            interim += e.results[i][0].transcript;
+          }
+        }
+
+        const recognizedText = (final || interim || '').trim();
+        if (recognizedText) {
+          duoLastTranscriptRef.current = recognizedText;
+          if (speaker === 'person1') {
+            setPerson1ManualText(recognizedText);
+          } else {
+            setPerson2ManualText(recognizedText);
+          }
+        }
+
+        if (final && final.trim()) {
+          const cleanFinal = final.trim();
+          duoHasTranslatedRef.current = true;
+          handleTranslateDuoMessage(cleanFinal, speaker);
         }
       };
 
@@ -653,13 +585,11 @@ export default function TranslatorSection({ onBackToHome, langMode, serverStatus
         if (e.error === 'not-allowed') {
           setDuoSpeechError(
             isKn
-              ? 'ಮೈಕ್ರೊಫೋನ್ ಅನುಮತಿ ನಿರಾಕರಿಸಲಾಗಿದೆ. ಬ್ರೌಸರ್‌ನಲ್ಲಿ ಮೈಕ್ ಬಳಕೆಗೆ ಅನುಮತಿ ನೀಡಿ.'
-              : 'Microphone permission was denied. Please allow microphone access in your browser.'
+              ? 'ಮೈಕ್ರೊಫೋನ್ ಅನುಮತಿ ನಿರಾಕರಿಸಲಾಗಿದೆ. ಬ್ರೌಸರ್ ವಿಳಾಸ ಪಟ್ಟಿಯಲ್ಲಿರುವ ಲಾಕ್ ಐಕಾನ್ ಕ್ಲಿಕ್ ಮಾಡಿ ಮೈಕ್ ಬಳಕೆಗೆ ಅನುಮತಿ ನೀಡಿ.'
+              : 'Microphone permission was denied. Please allow microphone access in your browser address bar.'
           );
         } else if (e.error === 'no-speech') {
-          setDuoSpeechError(
-            isKn ? 'ಯಾವುದೇ ಧ್ವನಿ ಕೇಳಿಸಲಿಲ್ಲ. ಮತ್ತೊಮ್ಮೆ ಮಾತನಾಡಿ.' : 'No speech detected. Please speak clearly.'
-          );
+          // Soft notice
         } else {
           setDuoSpeechError(
             isKn ? `ಧ್ವನಿ ಗ್ರಹಿಕೆ ದೋಷ: ${e.error}` : `Recognition error: ${e.error}`
@@ -668,8 +598,12 @@ export default function TranslatorSection({ onBackToHome, langMode, serverStatus
       };
 
       recognition.onend = () => {
-        // Only set idle if not already transitioning to translating or speaking
-        setDuoStatus((curr) => (curr === 'listening' ? 'idle' : curr));
+        if (!duoHasTranslatedRef.current && duoLastTranscriptRef.current) {
+          duoHasTranslatedRef.current = true;
+          handleTranslateDuoMessage(duoLastTranscriptRef.current, speaker);
+        } else if (!duoHasTranslatedRef.current) {
+          setDuoStatus('idle');
+        }
       };
 
       recognition.start();
