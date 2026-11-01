@@ -1,0 +1,10 @@
+/* App specific additional utilities if needed */
+.hidden-mobile {
+  display: inline;
+}
+
+@media (max-width: 640px) {
+  .hidden-mobile {
+    display: none !important;
+  }
+}
